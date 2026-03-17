@@ -75,7 +75,9 @@ one nginx can have 50m in the next setting:
 sudo k3s kubectl set resources deployment mini-netflix --requests=cpu=50m --limits=cpu=100m
 
 sudo k3s kubectl autoscale deployment mini-netflix --cpu-percent=50 --min=4 --max=20
+
 [Screencast from 2026-03-17 21-21-18.webm](https://github.com/user-attachments/assets/ca27102f-b2cb-43f9-85e2-a28be8518dae)
+
 log:
 
 ----------
