@@ -1,142 +1,92 @@
-# K3d-chaos-cluster
+# 🚀 Zero-Trust Hybrid Cloud & Chaos Engineering Lab
 
-tailscale to not make k3d public
-kube-proxy cause kubernetes has no public ip
-accidentally this happened, while I closed my computer:
-<img width="932" height="501" alt="image" src="https://github.com/user-attachments/assets/3a5bffd8-0c9d-4533-b74b-3b4c110cf5af" />
+This project is a practical implementation of a highly available, self-healing, and auto-scaling Kubernetes architecture. It demonstrates modern **Systems Engineering** principles by bridging a public cloud VPS and an on-premise local machine through a secure, zero-trust mesh VPN, simulating an Edge Computing environment.
 
-chaos: ab -n 100000 -c 100 http://100.120.50.29:30662/
-tailscale ip:100.120.50.29
+## 🎯 Project Objectives
+* **Decoupled Architecture:** Separate the Control Plane (Cloud) from the Compute Nodes (Edge).
+* **Zero-Trust Networking:** Ensure the Kubernetes API and all internal cluster traffic never traverse the public internet unencrypted.
+* **High Availability (HA):** Prove the system's ability to survive unexpected hardware/network failures (Chaos Engineering).
+* **Elasticity:** Implement metrics-based Horizontal Pod Autoscaling (HPA) to handle sudden traffic spikes dynamically.
 
-[Screencast from 2026-03-17 21-06-41.webm](https://github.com/user-attachments/assets/b6ef64e3-ffc7-4452-bb03-615322705d39)
+## 🛠️ Technology Stack
+* **Infrastructure:** K3s (Lightweight Kubernetes)
+* **Networking:** Tailscale (WireGuard-based Mesh VPN), Flannel (CNI over VPN)
+* **Compute:** Hetzner Cloud VPS (Control Plane / Master Node), Local Ubuntu Machine (Edge / Worker Node)
+* **Workload:** Nginx (Stateless web servers acting as simulated streaming nodes)
+* **Load Testing:** ApacheBench (`ab`)
 
-log:
+---
 
-----------
+## 🏗️ Architecture Overview
 
-This is ApacheBench, Version 2.3 <$Revision: 1903618 $>
-Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
-Licensed to The Apache Software Foundation, http://www.apache.org/
+The system is designed to bypass the need for public IP exposure for the worker nodes. 
+By utilizing Tailscale, the cluster spans across physical locations securely. The `kube-proxy` binds the `NodePort` across the Tailscale network interface, allowing the load balancer to distribute traffic seamlessly between the cloud and the on-premise machine.
 
-Benchmarking 100.120.50.29 (be patient)
-Completed 10000 requests
-Completed 20000 requests
-Completed 30000 requests
-Completed 40000 requests
-Completed 50000 requests
-Completed 60000 requests
-Completed 70000 requests
-Completed 80000 requests
-Completed 90000 requests
-^C
+---
 
-Server Software:        nginx/1.29.6
-Server Hostname:        100.120.50.29
-Server Port:            30662
+## 🌪️ Chaos Engineering: The "Sleep" Incident
 
-Document Path:          /
-Document Length:        896 bytes
+A core principle of Systems Engineering is building systems that expect failure. During the lab, an unplanned hardware failure occurred: **the local Ubuntu Edge node went into sleep mode.**
 
-Concurrency Level:      100
-Time taken for tests:   57.965 seconds
-Complete requests:      99603
-Failed requests:        0
-Total transferred:      112451787 bytes
-HTML transferred:       89244288 bytes
-**Requests per second:    1718.34 [#/sec] (mean)**
-Time per request:       58.196 [ms] (mean)
-Time per request:       0.582 [ms] (mean, across all concurrent requests)
-Transfer rate:          1894.54 [Kbytes/sec] received
+### The System's Reaction (Self-Healing)
+1.  The Master Node (VPS) detected that the Edge Node became unresponsive.
+2.  After the standard 5-minute Grace Period, the Master marked the Edge Node as `NotReady`.
+3.  **Eviction:** To maintain the declarative state of exactly 4 replicas, the Master immediately evicted the 2 lost Pods from the Edge Node and rescheduled them onto itself.
+4.  Zero downtime was achieved.
 
-Connection Times (ms)
-              min  mean[+/-sd] median   max
-Connect:       14   29  11.7     30     101
-Processing:    14   29  11.4     30     102
-Waiting:       13   29  11.5     30     102
-Total:         29   58  22.2     62     166
+<img width="932" height="501" alt="Pod Eviction and Rescheduling" src="https://github.com/user-attachments/assets/3a5bffd8-0c9d-4533-b74b-3b4c110cf5af" />
 
-Percentage of the requests served within a certain time (ms)
-  50%     62
-  66%     69
-  75%     73
-  80%     76
-  90%     87
-  95%     96
-  98%    109
-  99%    118
- 100%    166 (longest request)
+*Note: When the Edge node woke up and reconnected, the Master intentionally did not migrate the pods back to avoid unnecessary disruption. A manual `rollout restart` was performed to rebalance the cluster.*
 
-----------
+---
 
-this was a test where it has exactly 4 replicas
+## 🚦 Load Testing & Auto-Scaling (HPA)
 
-one nginx can have 50m in the next setting:
+To test the resilience of the Load Balancer and the Tailscale tunnel, a massive DDoS-like traffic spike was simulated using `ApacheBench`.
 
+### Phase 1: Fixed Replicas (No Auto-scaling)
+* **Configuration:** 4 static Nginx replicas.
+* **Attack:** `ab -n 100000 -c 100 http://100.120.50.29:30662/` (100,000 requests, 100 concurrent users over the VPN).
+
+**Results:**
+* **Failed requests:** `0` (Flawless routing)
+* **Requests per second:** `1718.34 [#/sec]`
+* **Mean time per request:** `58.196 [ms]`
+
+[Watch the Phase 1 Screencast](https://github.com/user-attachments/assets/b6ef64e3-ffc7-4452-bb03-615322705d39)
+
+### Phase 2: Horizontal Pod Autoscaler (HPA) Activated
+To make the system elastic, resource limits and an autoscaler were introduced.
+
+```bash
+# Setting strict CPU limits per container (5% of a core)
 sudo k3s kubectl set resources deployment mini-netflix --requests=cpu=50m --limits=cpu=100m
 
+# Configuring the HPA to scale out if average CPU hits 50% of the allocated 50m
 sudo k3s kubectl autoscale deployment mini-netflix --cpu-percent=50 --min=4 --max=20
+```
 
-[Screencast from 2026-03-17 21-21-18.webm](https://github.com/user-attachments/assets/ca27102f-b2cb-43f9-85e2-a28be8518dae)
+**The Attack & System Reaction:**
+When the exact same 100,000-request load test was executed, the CPU metrics skyrocketed. The HPA calculated the necessary capacity using the standard Kubernetes formula:
+`DesiredReplicas = ceil[CurrentReplicas * (CurrentMetricValue / DesiredMetricValue)]`
 
-log:
+The cluster dynamically scaled from 4 pods up to **10 pods** to distribute the heavy load. 
 
-----------
+**Results (Phase 2):**
+* **Failed requests:** `0`
+* **Requests per second:** `1691.67 [#/sec]`
+* *Observation:* The bottleneck shifted from the cluster's compute capacity to the local attacker's network/VPN encryption throughput. The cluster easily handled the load and scaled up precisely as requested.
 
-This is ApacheBench, Version 2.3 <$Revision: 1903618 $>
-Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
-Licensed to The Apache Software Foundation, http://www.apache.org/
+[Watch the Auto-Scaling Screencast](https://github.com/user-attachments/assets/ca27102f-b2cb-43f9-85e2-a28be8518dae)
 
-Benchmarking 100.120.50.29 (be patient)
-Completed 10000 requests
-Completed 20000 requests
-Completed 30000 requests
-Completed 40000 requests
-Completed 50000 requests
-Completed 60000 requests
-Completed 70000 requests
-Completed 80000 requests
-Completed 90000 requests
-Completed 100000 requests
-Finished 100000 requests
+*After the test concluded and the cool-down period passed, the HPA gracefully terminated the unneeded pods, scaling back down to 4.*
 
+---
 
-Server Software:        nginx/1.29.6
-Server Hostname:        100.120.50.29
-Server Port:            30662
+## 🔮 Future Roadmap: Multi-Master HA
+The current architecture uses a single Master Node (Edge pattern). To achieve true enterprise-grade High Availability for the Control Plane (Production pattern), the next phase involves:
+* Deploying an odd number of Master Nodes (e.g., 3 VPS instances).
+* Implementing an `etcd` distributed datastore for leader election and state synchronization to eliminate the single point of failure in the Control Plane.
 
-Document Path:          /
-Document Length:        896 bytes
-
-Concurrency Level:      100
-Time taken for tests:   59.113 seconds
-Complete requests:      100000
-Failed requests:        0
-Total transferred:      112900000 bytes
-HTML transferred:       89600000 bytes
-Requests per second:    1691.67 [#/sec] (mean)
-Time per request:       59.113 [ms] (mean)
-Time per request:       0.591 [ms] (mean, across all concurrent requests)
-Transfer rate:          1865.13 [Kbytes/sec] received
-
-Connection Times (ms)
-              min  mean[+/-sd] median   max
-Connect:       14   29  12.6     30     125
-Processing:    14   30  12.2     31     125
-Waiting:       14   30  12.2     30     125
-Total:         29   59  23.7     62     221
-
-Percentage of the requests served within a certain time (ms)
-  50%     62
-  66%     69
-  75%     72
-  80%     76
-  90%     88
-  95%    101
-  98%    116
-  99%    130
-
-----------
-
-the other pods closed after a while
-
-in the future: more masters in the cluster
+---
+*Built with ❤️ and Chaos.*
