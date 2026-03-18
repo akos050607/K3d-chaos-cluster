@@ -89,4 +89,3 @@ The current architecture uses a single Master Node (Edge pattern). To achieve tr
 * Implementing an `etcd` distributed datastore for leader election and state synchronization to eliminate the single point of failure in the Control Plane.
 
 ---
-*Built with ❤️ and Chaos.*
